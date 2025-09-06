@@ -3,38 +3,12 @@ import streamlit as st
 import openai
 from io import BytesIO
 from dotenv import load_dotenv
-import pyperclip  # For clipboard copy
+import pyperclip
 
 # ========================
 # Load local .env (for local testing)
 # ========================
 load_dotenv()
-
-# ========================
-# Function to load API key
-# ========================
-def load_api_key(user_input: str = None, is_deployment: bool = False):
-    """
-    Load OpenAI API key.
-
-    - Local testing: user input overrides .env
-    - Deployment: user input is mandatory
-    """
-    key = None
-
-    # 1. User input (always priority)
-    if user_input and user_input.strip():
-        key = user_input.strip()
-
-    # 2. Local .env (only if not deployment)
-    elif not is_deployment and os.getenv("OPENAI_API_KEY"):
-        key = os.getenv("OPENAI_API_KEY")
-
-    if not key:
-        st.error("⚠️ Please enter your OpenAI API key to continue.")
-        st.stop()
-
-    openai.api_key = key
 
 # ========================
 # Page config
@@ -78,17 +52,12 @@ preset_prompts = {
 # ========================
 # API Key Input
 # ========================
-st.markdown("Enter your OpenAI API key <span style='color:red'>*</span>:", unsafe_allow_html=True)
+st.markdown("Enter your OpenAI API key <span style='color:red'>*</span> (optional locally):", unsafe_allow_html=True)
 user_api_key = st.text_input(
     "",  # no label
     type="password",
-    help="Provide your OpenAI API key or leave blank to use default (.env in local testing)."
+    help="Provide your OpenAI API key or leave blank to use default (.env or Streamlit Secrets)."
 )
-
-# Change `is_deployment` to True when deploying
-is_deployment = False  # <-- set to True for deployed app
-load_api_key(user_api_key, is_deployment=is_deployment)
-st.markdown("<br>", unsafe_allow_html=True)
 
 # ========================
 # Post Details
@@ -174,60 +143,73 @@ def word_count(text):
 # Generate Post Button
 # ========================
 if st.button("🚀 Generate Post"):
-    if not topic.strip() or not custom_prompt.strip():
-        st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
+    # Determine API key
+    api_key = None
+    if user_api_key.strip():
+        api_key = user_api_key.strip()
+    elif os.getenv("OPENAI_API_KEY"):
+        api_key = os.getenv("OPENAI_API_KEY")
+    elif hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
+        api_key = st.secrets["OPENAI_API_KEY"]
+
+    if not api_key:
+        st.warning("⚠️ Please enter your OpenAI API key to generate the post.")
     else:
-        try:
-            with st.spinner("Generating your LinkedIn post..."):
-                generated_text = generate_post(
-                    prompt=custom_prompt,
-                    model=selected_model,
-                    tone=tone,
-                    max_tokens=max_tokens
+        openai.api_key = api_key
+
+        if not topic.strip() or not custom_prompt.strip():
+            st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
+        else:
+            try:
+                with st.spinner("Generating your LinkedIn post..."):
+                    generated_text = generate_post(
+                        prompt=custom_prompt,
+                        model=selected_model,
+                        tone=tone,
+                        max_tokens=max_tokens
+                    )
+
+                wc = word_count(generated_text)
+                st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                # Editable preview
+                st.markdown(
+                    """
+                    <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
+                        <p style='font-size:18px; font-weight:bold; margin:0;'>✨ Editable LinkedIn Post Preview</p>
+                    </div>
+                    """, unsafe_allow_html=True
                 )
 
-            # Word count
-            wc = word_count(generated_text)
-            st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
-
-            # Editable preview
-            st.markdown(
-                """
-                <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
-                    <p style='font-size:18px; font-weight:bold; margin:0;'>✨ Editable LinkedIn Post Preview</p>
-                </div>
-                """, unsafe_allow_html=True
-            )
-
-            edited_post = st.text_area(
-                "You can edit your LinkedIn post below before copying or downloading:",
-                value=generated_text,
-                height=300
-            )
-
-            # Buttons: Copy & Download
-            col1, col2 = st.columns([1,1])
-            with col1:
-                if st.button("📋 Copy Edited Post"):
-                    try:
-                        pyperclip.copy(edited_post)
-                        st.success("✅ Copied edited post to clipboard!")
-                    except Exception as e:
-                        st.error(f"⚠️ Failed to copy: {str(e)}")
-            with col2:
-                buffer = BytesIO()
-                buffer.write(edited_post.encode("utf-8"))
-                buffer.seek(0)
-                st.download_button(
-                    label="📥 Download Edited Post",
-                    data=buffer,
-                    file_name="linkedin_post.txt",
-                    mime="text/plain"
+                edited_post = st.text_area(
+                    "You can edit your LinkedIn post below before copying or downloading:",
+                    value=generated_text,
+                    height=300
                 )
 
-        except Exception as e:
-            st.error(f"⚠️ An error occurred while generating the post:\n{str(e)}")
+                # Buttons: Copy & Download
+                col1, col2 = st.columns([1,1])
+                with col1:
+                    if st.button("📋 Copy Edited Post"):
+                        try:
+                            pyperclip.copy(edited_post)
+                            st.success("✅ Copied edited post to clipboard!")
+                        except Exception as e:
+                            st.error(f"⚠️ Failed to copy: {str(e)}")
+                with col2:
+                    buffer = BytesIO()
+                    buffer.write(edited_post.encode("utf-8"))
+                    buffer.seek(0)
+                    st.download_button(
+                        label="📥 Download Edited Post",
+                        data=buffer,
+                        file_name="linkedin_post.txt",
+                        mime="text/plain"
+                    )
+
+            except Exception as e:
+                st.error(f"⚠️ An error occurred while generating the post:\n{str(e)}")
 
 # ========================
 # Footer
@@ -235,6 +217,10 @@ if st.button("🚀 Generate Post"):
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("---")
 st.markdown(
-    "<p style='text-align: center; font-size: 12px; color:#555;'>Made with ❤️ by Sachin Aditiya B powered by OpenAI</p>",
+    """
+    <p style='text-align: center; font-size: 12px; color:#555;'>
+        Made with ❤️ by <strong>Sachin Aditiya B</strong> · Powered by <a href='https://openai.com/' target='_blank'>OpenAI</a>
+    </p>
+    """,
     unsafe_allow_html=True
 )
