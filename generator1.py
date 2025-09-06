@@ -1,79 +1,240 @@
+import os
 import streamlit as st
 import openai
-import os
+from io import BytesIO
+from dotenv import load_dotenv
+import pyperclip  # For clipboard copy
 
-# --- Page Config ---
-st.set_page_config(page_title="LinkedIn Post Generator", page_icon="📢", layout="centered")
+# ========================
+# Load local .env (for local testing)
+# ========================
+load_dotenv()
 
-# --- Sidebar ---
-with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/174/174857.png", width=60)
-    st.markdown("### About Me")
-    st.write("""
-    Hi! I'm **Sachin Aditiya B**,  
-    Data Science graduate, passionate about ML, GenAI, and teaching.  
-    [🔗 Connect on LinkedIn](https://www.linkedin.com/in/sachin-aditiya-b)
-    """)
-    st.markdown("---")
-    st.markdown("⚡ Powered by **OpenAI**")
+# ========================
+# Function to load API key
+# ========================
+def load_api_key(user_input: str = None, is_deployment: bool = False):
+    """
+    Load OpenAI API key.
 
-# --- API Key Handling ---
-openai_api_key = None
+    - Local testing: user input overrides .env
+    - Deployment: user input is mandatory
+    """
+    key = None
 
-# 1️⃣ Try Streamlit secrets (deployment)
-if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
-    openai_api_key = st.secrets["OPENAI_API_KEY"]
+    # 1. User input (always priority)
+    if user_input and user_input.strip():
+        key = user_input.strip()
 
-# 2️⃣ Try local environment variable (VS Code)
-if not openai_api_key:
-    openai_api_key = os.getenv("OPENAI_API_KEY")
+    # 2. Local .env (only if not deployment)
+    elif not is_deployment and os.getenv("OPENAI_API_KEY"):
+        key = os.getenv("OPENAI_API_KEY")
 
-# 3️⃣ If neither, ask user (mandatory for deployment, optional locally)
-if not openai_api_key:
-    openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
-    if not openai_api_key:
-        if hasattr(st, "secrets"):  # deployed → must provide key
-            st.error("🚨 You must enter an OpenAI API key to use this app on Streamlit Cloud.")
-            st.stop()
-        else:  # local → optional
-            st.warning("You can enter an OpenAI API key to generate posts. Otherwise, the app will not work fully.")
+    if not key:
+        st.error("⚠️ Please enter your OpenAI API key to continue.")
+        st.stop()
 
-openai.api_key = openai_api_key
+    openai.api_key = key
 
-# --- Main App ---
-st.title("📢 LinkedIn Post Generator")
-st.markdown("Easily generate professional, engaging LinkedIn posts with AI.")
+# ========================
+# Page config
+# ========================
+st.set_page_config(
+    page_title="AI Co-Pilot for LinkedIn Content Creation",
+    page_icon="💼",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
-topic = st.text_input("Enter your topic:")
-tone = st.selectbox("Choose a tone:", ["Professional", "Inspirational", "Casual", "Funny", "Motivational"])
-audience = st.text_input("Target Audience (Optional):", "")
-cta = st.text_input("📢 Call to Action (Optional):", "")
+# ========================
+# Header
+# ========================
+st.markdown(
+    "<h1 style='text-align: center; color:#4B0082; font-size:48px; font-weight:bold;'>💼 AI Co-Pilot for LinkedIn Content Creation</h1>",
+    unsafe_allow_html=True
+)
+st.markdown(
+    "<p style='text-align: center; color:#555; font-size:18px;'>Generate professional LinkedIn posts quickly and effortlessly.</p>",
+    unsafe_allow_html=True
+)
+st.markdown("<br>", unsafe_allow_html=True)
 
-if st.button("Generate LinkedIn Post"):
-    if not topic.strip():
-        st.error("Please enter a topic!")
-    elif not openai_api_key:
-        st.error("OpenAI API key is required to generate posts.")
+# ========================
+# Sidebar Presets
+# ========================
+st.sidebar.header("📚 Preset Categories")
+category = st.sidebar.selectbox(
+    "Select a category to auto-fill prompt:",
+    ["None", "Leadership", "Startups", "Career Growth", "Teamwork", "Innovation"]
+)
+preset_prompts = {
+    "Leadership": "Write a professional LinkedIn post about leadership and inspiring teams.",
+    "Startups": "Write an engaging LinkedIn post highlighting startup culture and entrepreneurship.",
+    "Career Growth": "Create a professional LinkedIn post about career growth and personal development.",
+    "Teamwork": "Write a LinkedIn post emphasizing teamwork and collaboration.",
+    "Innovation": "Create a LinkedIn post about innovation and creative thinking in business."
+}
+
+# ========================
+# API Key Input
+# ========================
+st.markdown("Enter your OpenAI API key <span style='color:red'>*</span>:", unsafe_allow_html=True)
+user_api_key = st.text_input(
+    "",  # no label
+    type="password",
+    help="Provide your OpenAI API key or leave blank to use default (.env in local testing)."
+)
+
+# Change `is_deployment` to True when deploying
+is_deployment = False  # <-- set to True for deployed app
+load_api_key(user_api_key, is_deployment=is_deployment)
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ========================
+# Post Details
+# ========================
+st.markdown("Topic <span style='color:red'>*</span>", unsafe_allow_html=True)
+topic = st.text_input("", placeholder="Example: Teamwork in Startups", help="This field is mandatory")
+
+# Prompt Templates
+templates = [
+    "Write an inspiring LinkedIn post about {topic}.",
+    "Create a professional post highlighting {topic} for career growth.",
+    "Write a creative and engaging post about {topic} for LinkedIn audience."
+]
+selected_template = st.selectbox("Choose a prompt template", templates)
+
+# Generate final custom prompt
+if category != "None":
+    final_prompt = preset_prompts.get(category, selected_template.format(topic=topic if topic else "your topic"))
+else:
+    final_prompt = selected_template.format(topic=topic if topic else "your topic")
+
+st.markdown("✏️ Custom Prompt <span style='color:red'>*</span>", unsafe_allow_html=True)
+custom_prompt = st.text_area("", value=final_prompt, height=180, help="This field is mandatory")
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ========================
+# Advanced Options
+# ========================
+with st.expander("⚙️ Advanced Options"):
+    model_choice = st.selectbox(
+        "Choose a model (optional)",
+        [
+            "gpt-3.5-turbo (Recommended, low cost)",
+            "gpt-3.5-turbo-16k (Long prompts)",
+            "text-davinci-003 (High cost, creative)"
+        ],
+        index=0
+    )
+    model_mapping = {
+        "gpt-3.5-turbo (Recommended, low cost)": "gpt-3.5-turbo",
+        "gpt-3.5-turbo-16k (Long prompts)": "gpt-3.5-turbo-16k",
+        "text-davinci-003 (High cost, creative)": "text-davinci-003"
+    }
+    selected_model = model_mapping[model_choice]
+
+    col1, col2 = st.columns([1,1])
+    with col1:
+        tone = st.slider("Tone (0=formal,1=creative)", 0.0,1.0,0.7, help="0 = formal, 1 = creative")
+    with col2:
+        max_tokens = st.slider("Max tokens", 100, 800, 400, help="Approx. 1 token ≈ 0.75 words")
+
+if 'selected_model' not in locals():
+    selected_model = "gpt-3.5-turbo"
+
+# ========================
+# Utility Functions
+# ========================
+def generate_post(prompt, model="gpt-3.5-turbo", tone=0.7, max_tokens=400):
+    if "turbo" in model:
+        response = openai.ChatCompletion.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a professional LinkedIn content creator."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=tone,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].message['content'].strip()
     else:
-        with st.spinner("Generating your LinkedIn post..."):
-            prompt = f"""
-Write a {tone.lower()} LinkedIn post about '{topic}'.
-Target audience: {audience if audience else 'General'}.
-Include a strong call-to-action: {cta if cta else 'Encourage engagement'}.
-Keep it concise, engaging, and add relevant hashtags.
-            """
-            response = openai.Completion.create(
-                engine="text-davinci-003",
-                prompt=prompt,
-                max_tokens=180,
-                temperature=0.7
-            )
-            post = response.choices[0].text.strip()
-        
-        st.subheader("🎯 Your LinkedIn Post:")
-        st.write(post)
-        st.success("✅ Copy & Share this on LinkedIn!")
+        response = openai.Completion.create(
+            model=model,
+            prompt=f"You are a professional LinkedIn content creator.\n{prompt}",
+            temperature=tone,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].text.strip()
 
-# --- Footer ---
+def word_count(text):
+    return len(text.split())
+
+# ========================
+# Generate Post Button
+# ========================
+if st.button("🚀 Generate Post"):
+    if not topic.strip() or not custom_prompt.strip():
+        st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
+    else:
+        try:
+            with st.spinner("Generating your LinkedIn post..."):
+                generated_text = generate_post(
+                    prompt=custom_prompt,
+                    model=selected_model,
+                    tone=tone,
+                    max_tokens=max_tokens
+                )
+
+            # Word count
+            wc = word_count(generated_text)
+            st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Editable preview
+            st.markdown(
+                """
+                <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
+                    <p style='font-size:18px; font-weight:bold; margin:0;'>✨ Editable LinkedIn Post Preview</p>
+                </div>
+                """, unsafe_allow_html=True
+            )
+
+            edited_post = st.text_area(
+                "You can edit your LinkedIn post below before copying or downloading:",
+                value=generated_text,
+                height=300
+            )
+
+            # Buttons: Copy & Download
+            col1, col2 = st.columns([1,1])
+            with col1:
+                if st.button("📋 Copy Edited Post"):
+                    try:
+                        pyperclip.copy(edited_post)
+                        st.success("✅ Copied edited post to clipboard!")
+                    except Exception as e:
+                        st.error(f"⚠️ Failed to copy: {str(e)}")
+            with col2:
+                buffer = BytesIO()
+                buffer.write(edited_post.encode("utf-8"))
+                buffer.seek(0)
+                st.download_button(
+                    label="📥 Download Edited Post",
+                    data=buffer,
+                    file_name="linkedin_post.txt",
+                    mime="text/plain"
+                )
+
+        except Exception as e:
+            st.error(f"⚠️ An error occurred while generating the post:\n{str(e)}")
+
+# ========================
+# Footer
+# ========================
+st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("---")
-st.markdown("<center>Built with ❤️ by Sachin Aditiya | Powered by OpenAI</center>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='text-align: center; font-size: 12px; color:#555;'>Made with ❤️ by Sachin Aditiya B powered by OpenAI</p>",
+    unsafe_allow_html=True
+)
