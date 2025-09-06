@@ -3,9 +3,13 @@ import openai
 import os
 
 # --- Page Config ---
-st.set_page_config(page_title="LinkedIn Post Generator", page_icon="📢", layout="centered")
+st.set_page_config(
+    page_title="LinkedIn Post Generator",
+    page_icon="📢",
+    layout="centered"
+)
 
-# --- Sidebar ---
+# --- Sidebar Branding ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/174/174857.png", width=60)
     st.markdown("### About Me")
@@ -18,42 +22,37 @@ with st.sidebar:
     st.markdown("⚡ Powered by **OpenAI**")
 
 # --- API Key Handling ---
-openai_api_key = None
+# Try to load from environment variable first
+openai_api_key = os.getenv("OPENAI_API_KEY")
 
-# 1️⃣ Try Streamlit secrets (deployment)
-if hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
-    openai_api_key = st.secrets["OPENAI_API_KEY"]
-
-# 2️⃣ Try local environment variable (VS Code)
+# Ask user input if key not found
 if not openai_api_key:
-    openai_api_key = os.getenv("OPENAI_API_KEY")
+    user_api_key = st.text_input("Enter your OpenAI API Key (optional for local testing):", type="password")
+    openai_api_key = user_api_key if user_api_key else None
 
-# 3️⃣ If neither, ask user (mandatory for deployment, optional locally)
-if not openai_api_key:
-    openai_api_key = st.text_input("Enter your OpenAI API Key:", type="password")
-    if not openai_api_key:
-        if hasattr(st, "secrets"):  # deployed → must provide key
-            st.error("🚨 You must enter an OpenAI API key to use this app on Streamlit Cloud.")
-            st.stop()
-        else:  # local → optional
-            st.warning("You can enter an OpenAI API key to generate posts. Otherwise, the app will not work fully.")
+# Assign key if available
+if openai_api_key:
+    openai.api_key = openai_api_key
 
-openai.api_key = openai_api_key
-
-# --- Main App ---
+# --- Main Heading ---
 st.title("📢 LinkedIn Post Generator")
 st.markdown("Easily generate professional, engaging LinkedIn posts with AI.")
 
+# --- User Inputs ---
 topic = st.text_input("Enter your topic:")
-tone = st.selectbox("Choose a tone:", ["Professional", "Inspirational", "Casual", "Funny", "Motivational"])
+tone = st.selectbox(
+    "Choose a tone:",
+    ["Professional", "Inspirational", "Casual", "Funny", "Motivational"]
+)
 audience = st.text_input("Target Audience (Optional):", "")
 cta = st.text_input("📢 Call to Action (Optional):", "")
 
+# --- Generate Button ---
 if st.button("Generate LinkedIn Post"):
-    if not topic.strip():
+    if not openai_api_key:
+        st.error("Cannot generate posts without an OpenAI API key.")
+    elif topic.strip() == "":
         st.error("Please enter a topic!")
-    elif not openai_api_key:
-        st.error("OpenAI API key is required to generate posts.")
     else:
         with st.spinner("Generating your LinkedIn post..."):
             prompt = f"""
@@ -62,12 +61,14 @@ Target audience: {audience if audience else 'General'}.
 Include a strong call-to-action: {cta if cta else 'Encourage engagement'}.
 Keep it concise, engaging, and add relevant hashtags.
             """
+            
             response = openai.Completion.create(
                 engine="text-davinci-003",
                 prompt=prompt,
                 max_tokens=180,
                 temperature=0.7
             )
+            
             post = response.choices[0].text.strip()
         
         st.subheader("🎯 Your LinkedIn Post:")
@@ -76,4 +77,7 @@ Keep it concise, engaging, and add relevant hashtags.
 
 # --- Footer ---
 st.markdown("---")
-st.markdown("<center>Built with ❤️ by Sachin Aditiya | Powered by OpenAI</center>", unsafe_allow_html=True)
+st.markdown(
+    "<center>Built with ❤️ by Sachin Aditiya | Powered by OpenAI</center>",
+    unsafe_allow_html=True
+)
