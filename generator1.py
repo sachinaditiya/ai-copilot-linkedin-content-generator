@@ -3,38 +3,12 @@ import streamlit as st
 import openai
 from io import BytesIO
 from dotenv import load_dotenv
-import pyperclip  # For clipboard copy
+import pyperclip
 
 # ========================
 # Load local .env (for local testing)
 # ========================
 load_dotenv()
-
-# ========================
-# Function to load API key
-# ========================
-def load_api_key(user_input: str = None, is_deployment: bool = False):
-    """
-    Load OpenAI API key.
-
-    - Local testing: user input overrides .env
-    - Deployment: user input is mandatory
-    """
-    key = None
-
-    # 1. User input (always priority)
-    if user_input and user_input.strip():
-        key = user_input.strip()
-
-    # 2. Local .env (only if not deployment)
-    elif not is_deployment and os.getenv("OPENAI_API_KEY"):
-        key = os.getenv("OPENAI_API_KEY")
-
-    if not key:
-        st.error("⚠️ Please enter your OpenAI API key to continue.")
-        st.stop()
-
-    openai.api_key = key
 
 # ========================
 # Page config
@@ -60,10 +34,26 @@ st.markdown(
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ========================
-# Sidebar Presets
+# Topic Input
 # ========================
-st.sidebar.header("📚 Preset Categories")
-category = st.sidebar.selectbox(
+st.markdown("Topic <span style='color:red'>*</span>", unsafe_allow_html=True)
+topic = st.text_input("", placeholder="Example: Teamwork in Startups", help="This field is mandatory")
+
+# ========================
+# Prompt Templates
+# ========================
+templates = [
+    "Write an inspiring LinkedIn post about {topic}.",
+    "Create a professional post highlighting {topic} for career growth.",
+    "Write a creative and engaging post about {topic} for LinkedIn audience."
+]
+selected_template = st.selectbox("Choose a prompt template", templates)
+
+# ========================
+# Preset Categories
+# ========================
+st.markdown("📚 Preset Categories (optional)", unsafe_allow_html=True)
+category = st.selectbox(
     "Select a category to auto-fill prompt:",
     ["None", "Leadership", "Startups", "Career Growth", "Teamwork", "Innovation"]
 )
@@ -76,35 +66,8 @@ preset_prompts = {
 }
 
 # ========================
-# API Key Input
+# Final Custom Prompt
 # ========================
-st.markdown("Enter your OpenAI API key <span style='color:red'>*</span>:", unsafe_allow_html=True)
-user_api_key = st.text_input(
-    "",  # no label
-    type="password",
-    help="Provide your OpenAI API key or leave blank to use default (.env in local testing)."
-)
-
-# Change `is_deployment` to True when deploying
-is_deployment = False  # <-- set to True for deployed app
-load_api_key(user_api_key, is_deployment=is_deployment)
-st.markdown("<br>", unsafe_allow_html=True)
-
-# ========================
-# Post Details
-# ========================
-st.markdown("Topic <span style='color:red'>*</span>", unsafe_allow_html=True)
-topic = st.text_input("", placeholder="Example: Teamwork in Startups", help="This field is mandatory")
-
-# Prompt Templates
-templates = [
-    "Write an inspiring LinkedIn post about {topic}.",
-    "Create a professional post highlighting {topic} for career growth.",
-    "Write a creative and engaging post about {topic} for LinkedIn audience."
-]
-selected_template = st.selectbox("Choose a prompt template", templates)
-
-# Generate final custom prompt
 if category != "None":
     final_prompt = preset_prompts.get(category, selected_template.format(topic=topic if topic else "your topic"))
 else:
@@ -113,6 +76,15 @@ else:
 st.markdown("✏️ Custom Prompt <span style='color:red'>*</span>", unsafe_allow_html=True)
 custom_prompt = st.text_area("", value=final_prompt, height=180, help="This field is mandatory")
 st.markdown("<br>", unsafe_allow_html=True)
+
+# ========================
+# Language Selection
+# ========================
+st.markdown("🌐 Select Language (optional):", unsafe_allow_html=True)
+language = st.selectbox(
+    "Choose the language for your LinkedIn post",
+    ["English", "Hindi", "Spanish", "French", "German", "Chinese", "Tamil", "Telugu", "Malayalam"]
+)
 
 # ========================
 # Advanced Options
@@ -146,13 +118,14 @@ if 'selected_model' not in locals():
 # ========================
 # Utility Functions
 # ========================
-def generate_post(prompt, model="gpt-3.5-turbo", tone=0.7, max_tokens=400):
+def generate_post(prompt, model="gpt-3.5-turbo", tone=0.7, max_tokens=400, language="English"):
+    lang_prompt = f"Write this LinkedIn post in {language}:\n{prompt}"
     if "turbo" in model:
         response = openai.ChatCompletion.create(
             model=model,
             messages=[
                 {"role": "system", "content": "You are a professional LinkedIn content creator."},
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": lang_prompt}
             ],
             temperature=tone,
             max_tokens=max_tokens
@@ -161,7 +134,7 @@ def generate_post(prompt, model="gpt-3.5-turbo", tone=0.7, max_tokens=400):
     else:
         response = openai.Completion.create(
             model=model,
-            prompt=f"You are a professional LinkedIn content creator.\n{prompt}",
+            prompt=f"You are a professional LinkedIn content creator.\n{lang_prompt}",
             temperature=tone,
             max_tokens=max_tokens
         )
@@ -171,9 +144,37 @@ def word_count(text):
     return len(text.split())
 
 # ========================
+# API Key Input
+# ========================
+st.markdown("Enter your OpenAI API key <span style='color:red'>*</span> (required for deployed app):", unsafe_allow_html=True)
+user_api_key = st.text_input(
+    "",  
+    type="password",
+    help="Provide your OpenAI API key or leave blank to use default (.env for local)."
+)
+
+# ========================
+# Determine API key availability
+# ========================
+def get_api_key():
+    if user_api_key.strip():
+        return user_api_key.strip()
+    elif os.getenv("OPENAI_API_KEY"):
+        return os.getenv("OPENAI_API_KEY")
+    return None
+
+api_key = get_api_key()
+generate_disabled = api_key is None
+
+if generate_disabled:
+    st.warning("⚠️ Please enter your OpenAI API key to enable generating posts.")
+
+# ========================
 # Generate Post Button
 # ========================
-if st.button("🚀 Generate Post"):
+if st.button("🚀 Generate Post", disabled=generate_disabled):
+    openai.api_key = api_key
+
     if not topic.strip() or not custom_prompt.strip():
         st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
     else:
@@ -183,10 +184,10 @@ if st.button("🚀 Generate Post"):
                     prompt=custom_prompt,
                     model=selected_model,
                     tone=tone,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    language=language
                 )
 
-            # Word count
             wc = word_count(generated_text)
             st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
@@ -212,7 +213,7 @@ if st.button("🚀 Generate Post"):
                 if st.button("📋 Copy Edited Post"):
                     try:
                         pyperclip.copy(edited_post)
-                        st.success("✅ Copied edited post to clipboard!")
+                        st.success("✅ Your LinkedIn post has been generated successfully!")
                     except Exception as e:
                         st.error(f"⚠️ Failed to copy: {str(e)}")
             with col2:
@@ -235,6 +236,14 @@ if st.button("🚀 Generate Post"):
 st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("---")
 st.markdown(
-    "<p style='text-align: center; font-size: 12px; color:#555;'>Made with ❤️ by Sachin Aditiya B powered by OpenAI</p>",
+    """
+    <div style="text-align: center; font-size: 13px; color:#555;">
+        <a href='https://www.linkedin.com/in/sachin-aditiya-b-7691b314b/' target='_blank' 
+           style="color:#0A66C2; text-decoration:none; font-weight:500;">
+           Connect with me on LinkedIn
+        </a><br>
+        Made with ❤️ by Sachin Aditiya B | Powered by OpenAI
+    </div>
+    """,
     unsafe_allow_html=True
 )

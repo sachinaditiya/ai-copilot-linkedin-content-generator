@@ -52,11 +52,11 @@ preset_prompts = {
 # ========================
 # API Key Input
 # ========================
-st.markdown("Enter your OpenAI API key <span style='color:red'>*</span> (optional locally):", unsafe_allow_html=True)
+st.markdown("Enter your OpenAI API key <span style='color:red'>*</span> (required for deployed app):", unsafe_allow_html=True)
 user_api_key = st.text_input(
-    "",  # no label
+    "",  
     type="password",
-    help="Provide your OpenAI API key or leave blank to use default (.env or Streamlit Secrets)."
+    help="Provide your OpenAI API key or leave blank to use default (.env or Streamlit Secrets locally)."
 )
 
 # ========================
@@ -140,76 +140,78 @@ def word_count(text):
     return len(text.split())
 
 # ========================
+# Determine API key
+# ========================
+api_key = None
+if user_api_key.strip():
+    api_key = user_api_key.strip()
+elif os.getenv("OPENAI_API_KEY"):
+    api_key = os.getenv("OPENAI_API_KEY")
+elif hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
+    api_key = st.secrets["OPENAI_API_KEY"]
+
+generate_disabled = not api_key
+
+# ========================
 # Generate Post Button
 # ========================
-if st.button("🚀 Generate Post"):
-    # Determine API key
-    api_key = None
-    if user_api_key.strip():
-        api_key = user_api_key.strip()
-    elif os.getenv("OPENAI_API_KEY"):
-        api_key = os.getenv("OPENAI_API_KEY")
-    elif hasattr(st, "secrets") and "OPENAI_API_KEY" in st.secrets:
-        api_key = st.secrets["OPENAI_API_KEY"]
+if st.button("🚀 Generate Post", disabled=generate_disabled):
+    openai.api_key = api_key
 
-    if not api_key:
-        st.warning("⚠️ Please enter your OpenAI API key to generate the post.")
+    if not topic.strip() or not custom_prompt.strip():
+        st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
     else:
-        openai.api_key = api_key
-
-        if not topic.strip() or not custom_prompt.strip():
-            st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
-        else:
-            try:
-                with st.spinner("Generating your LinkedIn post..."):
-                    generated_text = generate_post(
-                        prompt=custom_prompt,
-                        model=selected_model,
-                        tone=tone,
-                        max_tokens=max_tokens
-                    )
-
-                wc = word_count(generated_text)
-                st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
-
-                # Editable preview
-                st.markdown(
-                    """
-                    <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
-                        <p style='font-size:18px; font-weight:bold; margin:0;'>✨ Editable LinkedIn Post Preview</p>
-                    </div>
-                    """, unsafe_allow_html=True
+        try:
+            with st.spinner("Generating your LinkedIn post..."):
+                generated_text = generate_post(
+                    prompt=custom_prompt,
+                    model=selected_model,
+                    tone=tone,
+                    max_tokens=max_tokens
                 )
 
-                edited_post = st.text_area(
-                    "You can edit your LinkedIn post below before copying or downloading:",
-                    value=generated_text,
-                    height=300
+            wc = word_count(generated_text)
+            st.success("✅ Your LinkedIn post has been generated successfully!")
+            st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            # Editable preview
+            st.markdown(
+                """
+                <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
+                    <p style='font-size:18px; font-weight:bold; margin:0;'>✨ Editable LinkedIn Post Preview</p>
+                </div>
+                """, unsafe_allow_html=True
+            )
+
+            edited_post = st.text_area(
+                "You can edit your LinkedIn post below before copying or downloading:",
+                value=generated_text,
+                height=300
+            )
+
+            # Buttons: Copy & Download
+            col1, col2 = st.columns([1,1])
+            with col1:
+                if st.button("📋 Copy Edited Post"):
+                    try:
+                        pyperclip.copy(edited_post)
+                        st.success("✅ Copied edited post to clipboard!")
+                    except Exception as e:
+                        st.error(f"⚠️ Failed to copy: {str(e)}")
+            with col2:
+                buffer = BytesIO()
+                buffer.write(edited_post.encode("utf-8"))
+                buffer.seek(0)
+                st.download_button(
+                    label="📥 Download Edited Post",
+                    data=buffer,
+                    file_name="linkedin_post.txt",
+                    mime="text/plain"
                 )
 
-                # Buttons: Copy & Download
-                col1, col2 = st.columns([1,1])
-                with col1:
-                    if st.button("📋 Copy Edited Post"):
-                        try:
-                            pyperclip.copy(edited_post)
-                            st.success("✅ Copied edited post to clipboard!")
-                        except Exception as e:
-                            st.error(f"⚠️ Failed to copy: {str(e)}")
-                with col2:
-                    buffer = BytesIO()
-                    buffer.write(edited_post.encode("utf-8"))
-                    buffer.seek(0)
-                    st.download_button(
-                        label="📥 Download Edited Post",
-                        data=buffer,
-                        file_name="linkedin_post.txt",
-                        mime="text/plain"
-                    )
-
-            except Exception as e:
-                st.error(f"⚠️ An error occurred while generating the post:\n{str(e)}")
+        except Exception as e:
+            st.error(f"⚠️ An error occurred while generating the post:\n{str(e)}")
 
 # ========================
 # Footer
