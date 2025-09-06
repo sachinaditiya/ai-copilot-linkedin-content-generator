@@ -1,0 +1,22 @@
+# Hide all .env files (API keys, secrets)
+.env
+
+# Hide all generator files except generator1.py
+generator2.py
+generator3.py
+generator4.py
+generator5.py
+generator6.py
+generator7.py
+generator8.py
+generator.py
+
+# Hide README if you want (optional)
+README.md
+
+# Ignore Python cache folders
+__pycache__/
+*.pyc
+
+# Hide other assets
+architecture_diagram.png
