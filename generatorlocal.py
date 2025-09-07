@@ -2,14 +2,19 @@ import os
 import streamlit as st
 import openai
 from io import BytesIO
-import pyperclip
 from dotenv import load_dotenv
+import pyperclip
 
 # ========================
-# Load .env for default API key
+# Load .env
 # ========================
 load_dotenv()
 DEFAULT_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# ========================
+# Detect environment
+# ========================
+IS_LOCAL = "STREAMLIT_SERVER_PORT" not in os.environ
 
 # ========================
 # Page config
@@ -20,16 +25,6 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="expanded"
 )
-
-# ========================
-# Session state
-# ========================
-FREE_LIMIT = 3
-
-if "user_posts_today" not in st.session_state:
-    st.session_state.user_posts_today = 0
-if "premium_unlocked" not in st.session_state:
-    st.session_state.premium_unlocked = False
 
 # ========================
 # Header
@@ -121,44 +116,10 @@ with st.expander("⚙️ Advanced Options"):
     with col1:
         tone = st.slider("Tone (0=formal,1=creative)", 0.0,1.0,0.7, help="0 = formal, 1 = creative")
     with col2:
-        max_tokens = st.slider("Max tokens", 3, 800, 400, help="Approx. 1 token ≈ 0.75 words")
+        max_tokens = st.slider("Max tokens", 100, 800, 400, help="Approx. 1 token ≈ 0.75 words")
 
 if 'selected_model' not in locals():
     selected_model = "gpt-3.5-turbo"
-
-# ========================
-# Optional OpenAI API Key for unlimited posts
-# ========================
-st.markdown("<br>", unsafe_allow_html=True)
-user_api_key = st.text_input("Enter your OpenAI API key (optional for unlimited posts):", type="password")
-
-# Determine premium status
-if user_api_key.strip():
-    st.session_state.premium_unlocked = True
-    openai_api_key_to_use = user_api_key.strip()
-else:
-    st.session_state.premium_unlocked = False
-    openai_api_key_to_use = DEFAULT_API_KEY  # Use your .env key locally for unlimited
-
-# ========================
-# Status Bar
-# ========================
-if st.session_state.premium_unlocked or DEFAULT_API_KEY:
-    status_text = "💎 Premium / Unlimited Access"
-    remaining_posts_text = "∞ posts remaining"
-else:
-    status_text = "⚡ Free Access"
-    remaining = max(0, FREE_LIMIT - st.session_state.user_posts_today)
-    remaining_posts_text = f"{remaining} posts remaining today"
-
-st.markdown(f"**Status:** {status_text} | **{remaining_posts_text}**")
-
-# Disable generate button if free limit reached and no key
-generate_disabled = False
-if not (st.session_state.premium_unlocked or DEFAULT_API_KEY):
-    if st.session_state.user_posts_today >= FREE_LIMIT:
-        generate_disabled = True
-        st.warning("⚠️ Free post limit reached. Enter OpenAI API key for unlimited posts.")
 
 # ========================
 # Utility Functions
@@ -189,19 +150,47 @@ def word_count(text):
     return len(text.split())
 
 # ========================
+# API Key Input
+# ========================
+user_api_key = st.text_input(
+    "Enter your OpenAI API key (optional for unlimited posts):",
+    type="password",
+    help="Provide your own key for unlimited posts. Otherwise, default key will be used."
+)
+
+# ========================
+# Determine API key and limits
+# ========================
+if user_api_key.strip():
+    api_key = user_api_key.strip()
+    unlimited = True  # user-provided key = unlimited
+else:
+    api_key = DEFAULT_API_KEY
+    unlimited = IS_LOCAL  # local = unlimited, deployment = limited
+
+# Deployment free post tracking
+if not IS_LOCAL and not user_api_key.strip():
+    if 'free_posts_left' not in st.session_state:
+        st.session_state.free_posts_left = 3  # 3 free posts per session
+
+# ========================
 # Generate Post Button
 # ========================
-if st.button("🚀 Generate Post", disabled=generate_disabled):
-    if st.session_state.premium_unlocked or DEFAULT_API_KEY:
-        openai.api_key = openai_api_key_to_use
-    else:
-        st.error("⚠️ OpenAI API key is required for unlimited generation.")
-        st.stop()
+if st.button("🚀 Generate Post"):
+    openai.api_key = api_key
 
     if not topic.strip() or not custom_prompt.strip():
         st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
     else:
         try:
+            if not unlimited:
+                if st.session_state.free_posts_left <= 0:
+                    st.warning("⚠️ Free post limit reached. Enter your own OpenAI API key for unlimited posts.")
+                    st.stop()
+                else:
+                    st.session_state.free_posts_left -= 1
+                    st.info(f"⚡ Free posts remaining: {st.session_state.free_posts_left}")
+
             with st.spinner("Generating your LinkedIn post..."):
                 generated_text = generate_post(
                     prompt=custom_prompt,
@@ -215,6 +204,7 @@ if st.button("🚀 Generate Post", disabled=generate_disabled):
             st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
+            # Editable preview
             st.markdown(
                 """
                 <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
@@ -228,10 +218,6 @@ if st.button("🚀 Generate Post", disabled=generate_disabled):
                 value=generated_text,
                 height=300
             )
-
-            # Increment free post count if user is free
-            if not (st.session_state.premium_unlocked or DEFAULT_API_KEY):
-                st.session_state.user_posts_today += 1
 
             # Buttons: Copy & Download
             col1, col2 = st.columns([1,1])
