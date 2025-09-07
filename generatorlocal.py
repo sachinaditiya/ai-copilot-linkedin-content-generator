@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 # Load .env for default API key
 # ========================
 load_dotenv()
+DEFAULT_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # ========================
 # Page config
@@ -136,13 +137,13 @@ if user_api_key.strip():
     st.session_state.premium_unlocked = True
     openai_api_key_to_use = user_api_key.strip()
 else:
-    st.session_state.premium_unlocked = bool(os.getenv("OPENAI_API_KEY"))
-    openai_api_key_to_use = os.getenv("OPENAI_API_KEY")
+    st.session_state.premium_unlocked = False
+    openai_api_key_to_use = DEFAULT_API_KEY  # Use your .env key locally for unlimited
 
 # ========================
 # Status Bar
 # ========================
-if st.session_state.premium_unlocked:
+if st.session_state.premium_unlocked or DEFAULT_API_KEY:
     status_text = "💎 Premium / Unlimited Access"
     remaining_posts_text = "∞ posts remaining"
 else:
@@ -152,9 +153,9 @@ else:
 
 st.markdown(f"**Status:** {status_text} | **{remaining_posts_text}**")
 
-# Disable generate button if free limit reached
+# Disable generate button if free limit reached and no key
 generate_disabled = False
-if not st.session_state.premium_unlocked:
+if not (st.session_state.premium_unlocked or DEFAULT_API_KEY):
     if st.session_state.user_posts_today >= FREE_LIMIT:
         generate_disabled = True
         st.warning("⚠️ Free post limit reached. Enter OpenAI API key for unlimited posts.")
@@ -191,69 +192,69 @@ def word_count(text):
 # Generate Post Button
 # ========================
 if st.button("🚀 Generate Post", disabled=generate_disabled):
-    if not openai_api_key_to_use:
-        st.error("⚠️ OpenAI API key is required for generation.")
-    else:
+    if st.session_state.premium_unlocked or DEFAULT_API_KEY:
         openai.api_key = openai_api_key_to_use
+    else:
+        st.error("⚠️ OpenAI API key is required for unlimited generation.")
+        st.stop()
 
-        if not topic.strip() or not custom_prompt.strip():
-            st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
-        else:
-            try:
-                with st.spinner("Generating your LinkedIn post..."):
-                    generated_text = generate_post(
-                        prompt=custom_prompt,
-                        model=selected_model,
-                        tone=tone,
-                        max_tokens=max_tokens,
-                        language=language
-                    )
-
-                wc = word_count(generated_text)
-                st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
-
-                # Editable preview
-                st.markdown(
-                    """
-                    <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
-                        <p style='font-size:18px; font-weight:bold; margin:0;'>✨ Editable LinkedIn Post Preview</p>
-                    </div>
-                    """, unsafe_allow_html=True
+    if not topic.strip() or not custom_prompt.strip():
+        st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
+    else:
+        try:
+            with st.spinner("Generating your LinkedIn post..."):
+                generated_text = generate_post(
+                    prompt=custom_prompt,
+                    model=selected_model,
+                    tone=tone,
+                    max_tokens=max_tokens,
+                    language=language
                 )
 
-                edited_post = st.text_area(
-                    "You can edit your LinkedIn post below before copying or downloading:",
-                    value=generated_text,
-                    height=300
+            wc = word_count(generated_text)
+            st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            st.markdown(
+                """
+                <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
+                    <p style='font-size:18px; font-weight:bold; margin:0;'>✨ Editable LinkedIn Post Preview</p>
+                </div>
+                """, unsafe_allow_html=True
+            )
+
+            edited_post = st.text_area(
+                "You can edit your LinkedIn post below before copying or downloading:",
+                value=generated_text,
+                height=300
+            )
+
+            # Increment free post count if user is free
+            if not (st.session_state.premium_unlocked or DEFAULT_API_KEY):
+                st.session_state.user_posts_today += 1
+
+            # Buttons: Copy & Download
+            col1, col2 = st.columns([1,1])
+            with col1:
+                if st.button("📋 Copy Edited Post"):
+                    try:
+                        pyperclip.copy(edited_post)
+                        st.success("✅ Your LinkedIn post has been copied to clipboard!")
+                    except Exception as e:
+                        st.error(f"⚠️ Failed to copy: {str(e)}")
+            with col2:
+                buffer = BytesIO()
+                buffer.write(edited_post.encode("utf-8"))
+                buffer.seek(0)
+                st.download_button(
+                    label="📥 Download Edited Post",
+                    data=buffer,
+                    file_name="linkedin_post.txt",
+                    mime="text/plain"
                 )
 
-                # Increment free post count
-                if not st.session_state.premium_unlocked:
-                    st.session_state.user_posts_today += 1
-
-                # Buttons: Copy & Download
-                col1, col2 = st.columns([1,1])
-                with col1:
-                    if st.button("📋 Copy Edited Post"):
-                        try:
-                            pyperclip.copy(edited_post)
-                            st.success("✅ Your LinkedIn post has been copied to clipboard!")
-                        except Exception as e:
-                            st.error(f"⚠️ Failed to copy: {str(e)}")
-                with col2:
-                    buffer = BytesIO()
-                    buffer.write(edited_post.encode("utf-8"))
-                    buffer.seek(0)
-                    st.download_button(
-                        label="📥 Download Edited Post",
-                        data=buffer,
-                        file_name="linkedin_post.txt",
-                        mime="text/plain"
-                    )
-
-            except Exception as e:
-                st.error(f"⚠️ An error occurred while generating the post:\n{str(e)}")
+        except Exception as e:
+            st.error(f"⚠️ An error occurred while generating the post:\n{str(e)}")
 
 # ========================
 # Footer
