@@ -6,15 +6,21 @@ from dotenv import load_dotenv
 import pyperclip
 
 # ========================
-# Load .env
+# Load environment
 # ========================
 load_dotenv()
-DEFAULT_API_KEY = os.getenv("OPENAI_API_KEY")
+IS_LOCAL = "STREAMLIT_SERVER_PORT" not in os.environ  # True for local
 
 # ========================
-# Detect environment
+# Default API Key
 # ========================
-IS_LOCAL = "STREAMLIT_SERVER_PORT" not in os.environ
+try:
+    if IS_LOCAL:
+        DEFAULT_API_KEY = os.getenv("OPENAI_API_KEY")  # local from .env
+    else:
+        DEFAULT_API_KEY = st.secrets.get("OPENAI_API_KEY")  # deployed
+except Exception:
+    DEFAULT_API_KEY = None
 
 # ========================
 # Page config
@@ -114,12 +120,43 @@ with st.expander("⚙️ Advanced Options"):
 
     col1, col2 = st.columns([1,1])
     with col1:
-        tone = st.slider("Tone (0=formal,1=creative)", 0.0,1.0,0.7, help="0 = formal, 1 = creative")
+        tone = st.slider("Tone (0=formal,1=creative)", 0.0,1.0,0.7)
     with col2:
-        max_tokens = st.slider("Max tokens", 100, 800, 400, help="Approx. 1 token ≈ 0.75 words")
+        max_tokens = st.slider("Max tokens", 3, 800, 400)  # minimum 3 tokens
 
 if 'selected_model' not in locals():
     selected_model = "gpt-3.5-turbo"
+
+# ========================
+# API Key Input
+# ========================
+user_api_key = st.text_input(
+    "Enter OpenAI API key (optional for unlimited posts):",
+    type="password",
+    help="Optional: Provide your own key for unlimited posts"
+)
+
+api_key = user_api_key.strip() or DEFAULT_API_KEY
+
+# ========================
+# Free post limit for deployment
+# ========================
+if not IS_LOCAL:
+    MAX_FREE_POSTS = 3
+    if "posts_generated" not in st.session_state:
+        st.session_state.posts_generated = 0
+    if not user_api_key and st.session_state.posts_generated >= MAX_FREE_POSTS:
+        st.warning(f"⚠️ Free limit reached. Enter your own OpenAI API key for unlimited posts.")
+        st.stop()
+
+# ========================
+# Check API Key
+# ========================
+if not api_key:
+    st.warning("⚠️ OpenAI API key is required to generate posts.")
+    st.stop()
+
+openai.api_key = api_key
 
 # ========================
 # Utility Functions
@@ -150,47 +187,13 @@ def word_count(text):
     return len(text.split())
 
 # ========================
-# API Key Input
-# ========================
-user_api_key = st.text_input(
-    "Enter your OpenAI API key (optional for unlimited posts):",
-    type="password",
-    help="Provide your own key for unlimited posts. Otherwise, default key will be used."
-)
-
-# ========================
-# Determine API key and limits
-# ========================
-if user_api_key.strip():
-    api_key = user_api_key.strip()
-    unlimited = True  # user-provided key = unlimited
-else:
-    api_key = DEFAULT_API_KEY
-    unlimited = IS_LOCAL  # local = unlimited, deployment = limited
-
-# Deployment free post tracking
-if not IS_LOCAL and not user_api_key.strip():
-    if 'free_posts_left' not in st.session_state:
-        st.session_state.free_posts_left = 3  # 3 free posts per session
-
-# ========================
 # Generate Post Button
 # ========================
 if st.button("🚀 Generate Post"):
-    openai.api_key = api_key
-
     if not topic.strip() or not custom_prompt.strip():
         st.warning("⚠️ Please enter BOTH a topic AND a custom prompt before generating the post.")
     else:
         try:
-            if not unlimited:
-                if st.session_state.free_posts_left <= 0:
-                    st.warning("⚠️ Free post limit reached. Enter your own OpenAI API key for unlimited posts.")
-                    st.stop()
-                else:
-                    st.session_state.free_posts_left -= 1
-                    st.info(f"⚡ Free posts remaining: {st.session_state.free_posts_left}")
-
             with st.spinner("Generating your LinkedIn post..."):
                 generated_text = generate_post(
                     prompt=custom_prompt,
@@ -200,11 +203,14 @@ if st.button("🚀 Generate Post"):
                     language=language
                 )
 
+            # Increment free post count if using default key
+            if not user_api_key and not IS_LOCAL:
+                st.session_state.posts_generated += 1
+
             wc = word_count(generated_text)
             st.markdown(f"<p style='font-size:14px; color:#555;'>Estimated word count: {wc} words</p>", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # Editable preview
             st.markdown(
                 """
                 <div style="background-color:#FFFACD;padding:15px;border-radius:10px;margin-bottom:10px;">
